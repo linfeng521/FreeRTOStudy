@@ -22,7 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,17 +42,34 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = { .name = "defaultTask", .stack_size = 128 * 4, .priority = (osPriority_t) osPriorityNormal, };
-/* USER CODE BEGIN PV */
+UART_HandleTypeDef huart1;
 
+/* Definitions for ledActionTask */
+osThreadId_t ledActionTaskHandle;
+const osThreadAttr_t ledActionTask_attributes = { .name = "ledActionTask", .stack_size = 128 * 4, .priority = (osPriority_t) osPriorityNormal, };
+/* Definitions for logTask */
+osThreadId_t logTaskHandle;
+const osThreadAttr_t logTask_attributes = { .name = "logTask", .stack_size = 128 * 4, .priority = (osPriority_t) osPriorityLow, };
+/* Definitions for countMutex */
+osMutexId_t countMutexHandle;
+const osMutexAttr_t countMutex_attributes = { .name = "countMutex" };
+/* Definitions for binSem */
+osSemaphoreId_t binSemHandle;
+const osSemaphoreAttr_t binSem_attributes = { .name = "binSem" };
+/* Definitions for countSem */
+osSemaphoreId_t countSemHandle;
+const osSemaphoreAttr_t countSem_attributes = { .name = "countSem" };
+/* USER CODE BEGIN PV */
+uint8_t rxData;
+uint16_t triggerCount;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-void StartDefaultTask(void *argument);
+static void MX_USART1_UART_Init(void);
+void LedActionTask(void *argument);
+void LogTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -59,7 +77,13 @@ void StartDefaultTask(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+	if (huart->Instance == USART1) {
+		osSemaphoreRelease(binSemHandle);
 
+		HAL_UART_Receive_IT(&huart1, &rxData, 1);
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -90,16 +114,27 @@ int main(void) {
 
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
+	MX_USART1_UART_Init();
 	/* USER CODE BEGIN 2 */
-
+	HAL_UART_Receive_IT(&huart1, &rxData, 1);
 	/* USER CODE END 2 */
 
 	/* Init scheduler */
 	osKernelInitialize();
+	/* Create the mutex(es) */
+	/* creation of countMutex */
+	countMutexHandle = osMutexNew(&countMutex_attributes);
 
 	/* USER CODE BEGIN RTOS_MUTEX */
 	/* add mutexes, ... */
 	/* USER CODE END RTOS_MUTEX */
+
+	/* Create the semaphores(s) */
+	/* creation of binSem */
+	binSemHandle = osSemaphoreNew(1, 0, &binSem_attributes);
+
+	/* creation of countSem */
+	countSemHandle = osSemaphoreNew(5, 0, &countSem_attributes);
 
 	/* USER CODE BEGIN RTOS_SEMAPHORES */
 	/* add semaphores, ... */
@@ -114,8 +149,11 @@ int main(void) {
 	/* USER CODE END RTOS_QUEUES */
 
 	/* Create the thread(s) */
-	/* creation of defaultTask */
-	defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+	/* creation of ledActionTask */
+	ledActionTaskHandle = osThreadNew(LedActionTask, NULL, &ledActionTask_attributes);
+
+	/* creation of logTask */
+	logTaskHandle = osThreadNew(LogTask, NULL, &logTask_attributes);
 
 	/* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
@@ -173,6 +211,37 @@ void SystemClock_Config(void) {
 }
 
 /**
+ * @brief USART1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART1_UART_Init(void) {
+
+	/* USER CODE BEGIN USART1_Init 0 */
+
+	/* USER CODE END USART1_Init 0 */
+
+	/* USER CODE BEGIN USART1_Init 1 */
+
+	/* USER CODE END USART1_Init 1 */
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 115200;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX_RX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	if (HAL_UART_Init(&huart1) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN USART1_Init 2 */
+
+	/* USER CODE END USART1_Init 2 */
+
+}
+
+/**
  * @brief GPIO Initialization Function
  * @param None
  * @retval None
@@ -206,21 +275,62 @@ static void MX_GPIO_Init(void) {
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_LedActionTask */
 /**
- * @brief  Function implementing the defaultTask thread.
+ * @brief  Function implementing the ledActionTask thread.
  * @param  argument: Not used
  * @retval None
  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument) {
+/* USER CODE END Header_LedActionTask */
+void LedActionTask(void *argument) {
 	/* USER CODE BEGIN 5 */
 	/* Infinite loop */
+
 	for (;;) {
+		/* 等待二值信号量：无触发时挂起任务 */
+		osSemaphoreAcquire(binSemHandle, osWaitForever);
+		// 执行动作
 		HAL_GPIO_TogglePin(Led1_GPIO_Port, Led1_Pin);
 		osDelay(50);
+
+		//释放计数信号量 Task1 完成一次 LED 触发，通知 Task2 来统计一次。
+		osSemaphoreRelease(countSemHandle);
 	}
 	/* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_LogTask */
+/**
+ * @brief Function implementing the logTask thread.
+ * @param argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_LogTask */
+void LogTask(void *argument) {
+	/* USER CODE BEGIN LogTask */
+	/* Infinite loop */
+	// 统计任务
+	// 等待计数信号量，安全修改 triggerCount
+	// 并串口打印次数
+	char message[32] = "";
+	for (;;) {
+		/* 等待计数信号量:无事件则阻塞，不空转占CPU */
+		osSemaphoreAcquire(countSemHandle, osWaitForever);
+
+		/* 上锁，保护共享变量 */
+		osMutexAcquire(countMutexHandle, osWaitForever);
+		triggerCount++;
+		osMutexRelease(countMutexHandle);
+
+		/* 打印（锁外执行，避免长时间占锁） */
+		sprintf(message, "triggerCount:%d\r\n", triggerCount);
+		HAL_UART_Transmit(&huart1, (uint8_t*) message, strlen(message), 200);
+
+		//模拟低频后台任务:例如500ms上传一次日志统计。
+		//消费者处理速度慢,计数信号量仍可累计事件
+		osDelay(500);
+	}
+	/* USER CODE END LogTask */
 }
 
 /**

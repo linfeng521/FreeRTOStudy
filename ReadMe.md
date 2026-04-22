@@ -5,4 +5,4 @@
 2. FreeRTOS接口CMSIS V2、FreeRTOS 10.3.1
 3. 硬件环境STM32F102C8T6(洋桃1号核心板)
 ## FreeRTOS 运行机制
-[FreeRTOS Drawio](imgs/FreeRTOS.drawio)
+[在线查看FreeRTOS Drawio](https://app.diagrams.net/?url=https://raw.githubusercontent.com/linfeng521/FreeRTOStudy/refs/heads/main/imgs/FreeRTOS.drawio)
